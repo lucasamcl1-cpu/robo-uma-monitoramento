@@ -22,7 +22,7 @@ logger = logging.getLogger("SheetsMonitor")
 
 SPREADSHEET_ID = "1K05xzKr5jg0LLqGWm73H8vdVfYFnq-Qs9MxKj8DUUZI"
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_GROUP_ID", "-5144739527")
 
 ABAS = [
     {"nome": "UMA Jardim dos Estados", "gid": "1025428530"},
