@@ -3,7 +3,6 @@ name: UMA Monitoramento Diário
 on:
   schedule:
     - cron: "0 13 * * 1-6"  # 09:00 Campo Grande MS (UTC-4) — seg a sáb
-    - cron: "54 1 * * 2-7"  # 21:54 Campo Grande MS (UTC-4) — seg a sáb (vira dia seguinte em UTC)
   workflow_dispatch:         # permite rodar manualmente pelo GitHub
 
 jobs:

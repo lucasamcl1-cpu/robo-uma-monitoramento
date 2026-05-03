@@ -8,6 +8,7 @@ import os
 import io
 import logging
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -65,7 +66,7 @@ async def enviar_telegram(mensagem: str) -> None:
 
 
 async def main() -> None:
-    data_hora = datetime.now().strftime("%d/%m/%Y %H:%M")
+    data_hora = datetime.now(ZoneInfo("America/Campo_Grande")).strftime("%d/%m/%Y %H:%M")
     logger.info(f"Iniciando monitoramento — {data_hora}")
 
     for aba in ABAS:
