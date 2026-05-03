@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Monitora células H2 e I2 de uma planilha Google Sheets pública
-e envia os valores via Telegram.
+Monitora colunas I e J (linhas 2-10) de cada aba da planilha UMA
+e envia um resumo por aba via Telegram.
 """
 import asyncio
 import os
 import io
 import logging
+from datetime import datetime
 
 import pandas as pd
 import requests
@@ -18,29 +19,39 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("SheetsMonitor")
 
-SPREADSHEET_ID = "1oyzFxUfsuqpLV2QR88hFCVqFfBEyEGefg1BXjp78spA"
-SHEET_GID = "1025428530"
+SPREADSHEET_ID = "1K05xzKr5jg0LLqGWm73H8vdVfYFnq-Qs9MxKj8DUUZI"
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
-CSV_URL = (
-    f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
-    f"/export?format=csv&gid={SHEET_GID}"
-)
+ABAS = [
+    {"nome": "UMA Jardim dos Estados", "gid": "1025428530"},
+    {"nome": "UMA Monte Castelo",      "gid": "1606234752"},
+    {"nome": "UMA Brilhante",          "gid": "173321880"},
+    {"nome": "UMA Centro",             "gid": "448467908"},
+    {"nome": "UMA Julio de Castilho",  "gid": "1661500249"},
+    {"nome": "UMA Chacara Cachoeira",  "gid": "1159353007"},
+]
 
 
-def ler_celulas() -> tuple[str, str]:
-    """Baixa a planilha e retorna os valores de H2 e I2."""
-    resp = requests.get(CSV_URL, timeout=15)
+def ler_aba(gid: str) -> list[tuple[str, str]]:
+    """Lê I2:J10 de uma aba e retorna lista de (descrição, valor)."""
+    url = (
+        f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
+        f"/export?format=csv&gid={gid}"
+    )
+    resp = requests.get(url, timeout=15)
+    resp.encoding = "utf-8"
     resp.raise_for_status()
 
     df = pd.read_csv(io.StringIO(resp.text), header=None)
 
-    # Linha 2 = índice 1, coluna H = índice 7, coluna I = índice 8
-    h2 = str(df.iat[1, 7]) if df.shape[0] > 1 and df.shape[1] > 7 else "N/A"
-    i2 = str(df.iat[1, 8]) if df.shape[0] > 1 and df.shape[1] > 8 else "N/A"
+    resultado = []
+    for row in range(1, 10):  # índices 1-9 = linhas 2-10
+        descricao = str(df.iat[row, 8]) if df.shape[0] > row and df.shape[1] > 8 else "N/A"
+        valor = str(df.iat[row, 9]) if df.shape[0] > row and df.shape[1] > 9 else "N/A"
+        resultado.append((descricao, valor))
 
-    return h2, i2
+    return resultado
 
 
 async def enviar_telegram(mensagem: str) -> None:
@@ -51,21 +62,32 @@ async def enviar_telegram(mensagem: str) -> None:
             if resp.status != 200:
                 text = await resp.text()
                 logger.error(f"Erro Telegram {resp.status}: {text}")
-            else:
-                logger.info("Mensagem enviada com sucesso.")
 
 
 async def main() -> None:
-    logger.info("Lendo planilha...")
-    h2, i2 = ler_celulas()
-    logger.info(f"H2={h2}  I2={i2}")
+    data_hora = datetime.now().strftime("%d/%m/%Y %H:%M")
+    logger.info(f"Iniciando monitoramento — {data_hora}")
 
-    mensagem = (
-        "📊 <b>UMA — Monitoramento Diário</b>\n\n"
-        f"<b>H2:</b> {h2}\n"
-        f"<b>I2:</b> {i2}"
-    )
-    await enviar_telegram(mensagem)
+    for aba in ABAS:
+        logger.info(f"Lendo aba: {aba['nome']}...")
+        try:
+            dados = ler_aba(aba["gid"])
+        except Exception as e:
+            logger.error(f"Erro ao ler {aba['nome']}: {e}")
+            continue
+
+        linhas = "\n".join(f"  <b>{desc}:</b> {valor}" for desc, valor in dados)
+        mensagem = (
+            f"📍 <b>{aba['nome']}</b>\n"
+            f"<i>{data_hora}</i>\n\n"
+            f"{linhas}"
+        )
+
+        await enviar_telegram(mensagem)
+        logger.info(f"  ✓ enviado")
+        await asyncio.sleep(1)  # evita rate limit do Telegram
+
+    logger.info("Monitoramento concluído.")
 
 
 if __name__ == "__main__":
