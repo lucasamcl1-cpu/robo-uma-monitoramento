@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 """
-Monitora colunas I e J (linhas 2-10) de cada aba da planilha UMA
-e envia um resumo por aba via Telegram.
+Monitora planilha UMA: envia resumo J2:J10 e último dia preenchido por aba.
 """
-import asyncio
 import os
 import io
+import time
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
-import aiohttp
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -33,9 +31,22 @@ ABAS = [
     {"nome": "UMA Chacara Cachoeira",  "gid": "1159353007"},
 ]
 
+# Linha de início dos dias (índice 13 = linha 14 da planilha)
+LINHA_INICIO_DIAS = 13
 
-def ler_aba(gid: str) -> list[tuple[str, str]]:
-    """Lê I2:J10 de uma aba e retorna lista de (descrição, valor)."""
+# Coluna J (índice 9) = Real Fat — indica se o dia foi preenchido
+COL_REAL_FAT = 9
+
+# Coluna B (índice 1) = Data
+COL_DATA = 1
+
+
+def ler_aba(gid: str) -> tuple[list[tuple[str, str]], str]:
+    """
+    Retorna:
+      - lista de (descrição, valor) para I2:J10
+      - último dia preenchido (ex: '04/05/26  seg.')
+    """
     url = (
         f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
         f"/export?format=csv&gid={gid}"
@@ -46,50 +57,62 @@ def ler_aba(gid: str) -> list[tuple[str, str]]:
 
     df = pd.read_csv(io.StringIO(resp.text), header=None)
 
-    resultado = []
-    for row in range(1, 10):  # índices 1-9 = linhas 2-10
+    # Resumo I2:J10
+    resumo = []
+    for row in range(1, 10):
         descricao = str(df.iat[row, 8]) if df.shape[0] > row and df.shape[1] > 8 else "N/A"
-        valor = str(df.iat[row, 9]) if df.shape[0] > row and df.shape[1] > 9 else "N/A"
-        resultado.append((descricao, valor))
+        valor     = str(df.iat[row, 9]) if df.shape[0] > row and df.shape[1] > 9 else "N/A"
+        resumo.append((descricao, valor))
 
-    return resultado
+    # Último dia preenchido: última linha com J (Real Fat) não-NaN
+    ultimo_dia = "Não encontrado"
+    for row in range(len(df) - 1, LINHA_INICIO_DIAS - 1, -1):
+        if df.shape[1] <= COL_REAL_FAT:
+            break
+        val_j = df.iat[row, COL_REAL_FAT]
+        val_b = df.iat[row, COL_DATA]
+        if pd.notna(val_j) and str(val_j).strip() not in ("", "nan", "Real Fat"):
+            dia_semana = str(df.iat[row, 2]).strip()  # col C = Dia
+            ultimo_dia = f"{str(val_b).strip()}  {dia_semana}"
+            break
+
+    return resumo, ultimo_dia
 
 
-async def enviar_telegram(mensagem: str) -> None:
+def enviar_telegram(mensagem: str) -> None:
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": mensagem, "parse_mode": "HTML"}
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload) as resp:
-            if resp.status != 200:
-                text = await resp.text()
-                logger.error(f"Erro Telegram {resp.status}: {text}")
+    resp = requests.post(url, json=payload, timeout=15)
+    if resp.status_code != 200:
+        logger.error(f"Erro Telegram {resp.status_code}: {resp.text}")
 
 
-async def main() -> None:
+def main() -> None:
     data_hora = datetime.now(ZoneInfo("America/Campo_Grande")).strftime("%d/%m/%Y %H:%M")
     logger.info(f"Iniciando monitoramento — {data_hora}")
 
     for aba in ABAS:
         logger.info(f"Lendo aba: {aba['nome']}...")
         try:
-            dados = ler_aba(aba["gid"])
+            resumo, ultimo_dia = ler_aba(aba["gid"])
         except Exception as e:
             logger.error(f"Erro ao ler {aba['nome']}: {e}")
             continue
 
-        linhas = "\n".join(f"  <b>{desc}:</b> {valor}" for desc, valor in dados)
+        linhas_resumo = "\n".join(f"  <b>{desc}:</b> {valor}" for desc, valor in resumo)
         mensagem = (
             f"📍 <b>{aba['nome']}</b>\n"
             f"<i>{data_hora}</i>\n\n"
-            f"{linhas}"
+            f"{linhas_resumo}\n\n"
+            f"📅 <b>Último dia preenchido:</b> {ultimo_dia}"
         )
 
-        await enviar_telegram(mensagem)
-        logger.info(f"  ✓ enviado")
-        await asyncio.sleep(1)  # evita rate limit do Telegram
+        enviar_telegram(mensagem)
+        logger.info(f"  ✓ enviado | último dia: {ultimo_dia}")
+        time.sleep(1)
 
     logger.info("Monitoramento concluído.")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
